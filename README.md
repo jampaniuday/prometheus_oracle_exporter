@@ -17,7 +17,6 @@ The following metrics are exposed currently. Support for RAC (databasename and i
 - oracledb_tablespace (tablespace total/free)
 - oracledb_asmspace (Space in ASM (v$asm_disk/v$asm_diskgroup))
 - oracledb_interconnect (view v$sysstat (gc cr blocks served / gc cr blocks flushed / gc cr blocks received))
-- oracledb_recovery (percentage usage in FRA from V$RECOVERY_FILE_DEST)
 - oracledb_redo (Redo log switches over last 5 min from v$log_history)
 - oracledb_cachehitratio (Cache hit ratios (v$sysmetric)
 - oracledb_up (Whether the Oracle server is up)
@@ -32,6 +31,7 @@ The following metrics are exposed currently. Support for RAC (databasename and i
 - oracledb_tablebytes (Bytes used by Table)
 - oracledb_indexbytes (Bytes used by Indexes of associated Table)
 - oracledb_lobbytes (Bytes used by Lobs of associated Table)
+- oracledb_recovery (percentage usage in FRA from V$RECOVERY_FILE_DEST)
 
 
 The Oracle Alertlog file is scanned and the metrics are exposed as a gauge metric with a total occurence of the specific ORA.
@@ -62,6 +62,7 @@ scrape_configs:
     params:
       tablerows: [true]
       lobbytes: [true]
+      recovery: [true]
     static_configs:
       - targets:
          - oracle.host.com:9161
@@ -78,6 +79,7 @@ scrape_configs:
     params:
       tablebytes: [true]
       indexbytes: [true]
+      recovery: [true]
     static_configs:
       - targets:
          - oracle.host.com:9161
@@ -98,23 +100,25 @@ export NLS_LANG=AMERICAN_AMERICA.UTF8
 ```bash
 Usage of ./prometheus_oracle_exporter:
   -accessfile string
-    	Last access for parsed Oracle Alerts. (default "access.conf")
+    Last access for parsed Oracle Alerts. (default "access.conf")
   -configfile string
-    	ConfigurationFile in YAML format. (default "oracle.conf")
+    ConfigurationFile in YAML format. (default "oracle.conf")
   -indexbytes
-    	Expose Index size for any Table (CAN TAKE VERY LONG)
+    Expose Index size for any Table (CAN TAKE VERY LONG)
   -lobbytes
-    	Expose Lobs size for any Table (CAN TAKE VERY LONG)
+    Expose Lobs size for any Table (CAN TAKE VERY LONG)
   -logfile string
-    	Logfile for parsed Oracle Alerts. (default "exporter.log")
+    Logfile for parsed Oracle Alerts. (default "exporter.log")
+  -recovery
+    Expose Recovery percentage usage of FRA (CAN TAKE VERY LONG)
   -tablebytes
-    	Expose Table size (CAN TAKE VERY LONG)
+    Expose Table size (CAN TAKE VERY LONG)
   -tablerows
-    	Expose Table rows (CAN TAKE VERY LONG)
+    Expose Table rows (CAN TAKE VERY LONG)
   -web.listen-address string
-    	Address to listen on for web interface and telemetry. (default ":9161")
+    Address to listen on for web interface and telemetry. (default ":9161")
   -web.telemetry-path string
-    	Path under which to expose metrics. (default "/metrics")
+    Path under which to expose metrics. (default "/metrics")
 ```
 
 # Grafana

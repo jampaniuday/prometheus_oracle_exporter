@@ -8,6 +8,7 @@ import (
     "time"
   _ "github.com/mattn/go-oci8"
     "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
     "github.com/prometheus/common/log"
 )
 
@@ -48,17 +49,19 @@ type Exporter struct {
   vTabBytes       bool
   vIndBytes       bool
   vLobBytes       bool
+  vRecovery       bool
 }
 
 var (
   // Version will be set at build time.
-  Version       = "1.1.2"
+  Version       = "1.1.3"
   listenAddress = flag.String("web.listen-address", ":9161", "Address to listen on for web interface and telemetry.")
   metricPath    = flag.String("web.telemetry-path", "/metrics", "Path under which to expose metrics.")
   pTabRows      = flag.Bool("tablerows", false, "Expose Table rows (CAN TAKE VERY LONG)")
   pTabBytes     = flag.Bool("tablebytes", false, "Expose Table size (CAN TAKE VERY LONG)")
   pIndBytes     = flag.Bool("indexbytes", false, "Expose Index size for any Table (CAN TAKE VERY LONG)")
   pLobBytes     = flag.Bool("lobbytes", false, "Expose Lobs size for any Table (CAN TAKE VERY LONG)")
+  pRecovery     = flag.Bool("recovery", false, "Expose Recovery percentage usage of FRA (CAN TAKE VERY LONG)")
   configFile    = flag.String("configfile", "oracle.conf", "ConfigurationFile in YAML format.")
   logFile       = flag.String("logfile", "exporter.log", "Logfile for parsed Oracle Alerts.")
   accessFile    = flag.String("accessfile", "access.conf", "Last access for parsed Oracle Alerts.")
@@ -71,6 +74,7 @@ var (
                             <a href='` + *metricPath + `?tablebytes=true'>Metrics with tablebytes</a></p>
                             <a href='` + *metricPath + `?indexbytes=true'>Metrics with indexbytes</a></p>
                             <a href='` + *metricPath + `?lobbytes=true'>Metrics with lobbytes</a></p>
+                            <a href='` + *metricPath + `?recovery=true'>Metrics with recovery</a></p>
                           </body>
                           </html>`)
 )
@@ -223,7 +227,7 @@ func (e *Exporter) ScrapeQuery() {
       for _, query := range conn.Queries {
         rows, err = conn.db.Query(query.Sql)
         if err != nil {
-          break
+          continue
         }
         defer rows.Close()
         for rows.Next() {
@@ -250,7 +254,7 @@ func (e *Exporter) ScrapeParameter() {
     if conn.db != nil {
       rows, err = conn.db.Query(`select name,value from v$parameter WHERE num=43`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -277,7 +281,7 @@ func (e *Exporter) ScrapeServices() {
     if conn.db != nil {
       rows, err = conn.db.Query(`select name from v$active_services`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -310,7 +314,7 @@ func (e *Exporter) ScrapeCache() {
                                  from v$sysmetric
                                  where group_id=2 and metric_id in (2000,2050,2112,2110)`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -337,7 +341,7 @@ func (e *Exporter) ScrapeRedo() {
     if conn.db != nil {
       rows, err = conn.db.Query(`select count(*) from v$log_history where first_time > sysdate - 1/24/12`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -362,7 +366,7 @@ func (e *Exporter) ScrapeRecovery() {
       rows, err = conn.db.Query(`SELECT sum(percent_space_used) , sum(percent_space_reclaimable)
                                  from V$FLASH_RECOVERY_AREA_USAGE`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -390,7 +394,7 @@ func (e *Exporter) ScrapeInterconnect() {
                                  FROM V$SYSSTAT
                                  WHERE name in ('gc cr blocks served','gc cr blocks flushed','gc cr blocks received')`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -420,7 +424,7 @@ func (e *Exporter) ScrapeAsmspace() {
                                   AND  d.header_status = 'MEMBER'
                                  GROUP by  g.name,  g.group_number`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -462,7 +466,7 @@ func (e *Exporter) ScrapeTablespace() {
                                  FROM dba_temp_free_space
                                  GROUP BY tablespace_name`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -494,7 +498,7 @@ func (e *Exporter) ScrapeSession() {
                                  FROM v$session
                                  GROUP BY decode(username,NULL,'SYSTEM','SYS','SYSTEM','USER'),status`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -536,7 +540,7 @@ func (e *Exporter) ScrapeSysstat() {
       rows, err = conn.db.Query(`SELECT name, value FROM v$sysstat
                                     WHERE statistic# in (6,7,1084,1089)`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -564,7 +568,7 @@ func (e *Exporter) ScrapeWaitclass() {
                                     FROM v$waitclassmetric  m, v$system_wait_class n
                                     WHERE m.wait_class_id=n.wait_class_id and n.wait_class != 'Idle'`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -595,7 +599,7 @@ func (e *Exporter) ScrapeSysmetric() {
     if conn.db != nil {
       rows, err = conn.db.Query("select metric_name,value from v$sysmetric where metric_id in (2092,2093,2124,2100)")
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -623,7 +627,7 @@ func (e *Exporter) ScrapeTablerows() {
                                  from dba_tables
                                  where owner not like '%SYS%' and num_rows is not null`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -654,7 +658,7 @@ func (e *Exporter) ScrapeTablebytes() {
                                  WHERE stab.owner = tab.owner AND stab.segment_name = tab.table_name
                                  AND tab.owner NOT LIKE '%SYS%'`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -685,7 +689,7 @@ func (e *Exporter) ScrapeIndexbytes() {
                                  and table_owner NOT LIKE '%SYS%'
                                  group by table_owner,table_name`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -716,7 +720,7 @@ func (e *Exporter) ScrapeLobbytes() {
                                  and l.owner NOT LIKE '%SYS%'
                                  group by l.owner,l.table_name`)
       if err != nil {
-        break
+        continue
       }
       defer rows.Close()
       for rows.Next() {
@@ -778,7 +782,7 @@ func (e *Exporter) Connect() {
       if err == nil {
         err = config.Cfgs[i].db.QueryRow("select db_unique_name,instance_name from v$database,v$instance").Scan(&dbname,&inname)
         if err == nil {
-          if (conf.Database != dbname) || (conf.Instance != inname) {
+          if (len(conf.Database)==0) || (len(conf.Instance)==0) {
             config.Cfgs[i].Database = dbname
             config.Cfgs[i].Instance = inname
           }
@@ -866,7 +870,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
   e.ScrapeInterconnect()
   e.interconnect.Collect(ch)
 
-  if e.vTabRows || *pTabRows || e.vTabBytes || *pTabBytes || e.vIndBytes || *pIndBytes || e.vLobBytes || *pLobBytes {
+  if e.vRecovery || *pRecovery {
     e.ScrapeRecovery()
     e.recovery.Collect(ch)
   }
@@ -931,11 +935,13 @@ func (e *Exporter) Handler(w http.ResponseWriter, r *http.Request) {
   e.vTabBytes = false
   e.vIndBytes = false
   e.vLobBytes = false
+  e.vRecovery = false
   if r.URL.Query().Get("tablerows") == "true" {; e.vTabRows = true; }
   if r.URL.Query().Get("tablebytes") == "true" {; e.vTabBytes = true; }
   if r.URL.Query().Get("indexbytes") == "true" {; e.vIndBytes = true; }
   if r.URL.Query().Get("lobbytes") == "true" {; e.vLobBytes = true; }
-  prometheus.Handler().ServeHTTP(w, r)
+  if r.URL.Query().Get("recovery") == "true" {; e.vRecovery = true; }
+  promhttp.Handler().ServeHTTP(w, r)
 }
 
 func main() {
